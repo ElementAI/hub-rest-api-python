@@ -13,7 +13,6 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument("project_name")
-parser.add_argument("version_name")
 
 args = parser.parse_args()
 
@@ -27,15 +26,12 @@ if 'totalCount' in projects and projects['totalCount'] > 0:
 			continue
 
 		project_versions = hub.get_project_versions(
-			project, 
-			parameters={'q':"versionName:{}".format(args.version_name)}
+			project
 		)
 
 		project_version_codelocations = None
 		if 'totalCount' in project_versions and project_versions['totalCount'] > 0:
 			for project_version in project_versions['items']:
-				if project_version['versionName'] != args.version_name:
-					continue
 				project_version_codelocations = hub.get_version_codelocations(project_version)
 
 				if 'totalCount' in project_version_codelocations and project_version_codelocations['totalCount'] > 0:
@@ -44,11 +40,14 @@ if 'totalCount' in projects and projects['totalCount'] > 0:
 						print("Deleting code location at: {}".format(code_location_url))
 						hub.execute_delete(code_location_url)
 				else:
-					print("Did not find any codelocations (scans) in version {} of project {}".format(args.version_name, args.project_name))
+					print("Did not find any codelocations (scans) in version {} of project {}".format(project_version, args.project_name))
 
 				print("Deleting project-version at: {}".format(project_version['_meta']['href']))
 				hub.execute_delete(project_version['_meta']['href'])
 		else:
-			print("Did not find version with name {} in project {}".format(args.version_name, args.project_name))
+			print("Did not find versions in project {}".format(args.project_name))
+		
+	print("Deleting project at: {}".format(project['_meta']['href']))
+	hub.execute_delete(project['_meta']['href'])
 else:
 	print("Did not find project with name {}".format(args.project_name))
