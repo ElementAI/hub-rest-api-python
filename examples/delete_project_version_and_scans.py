@@ -46,7 +46,7 @@ if 'totalCount' in projects and projects['totalCount'] > 0:
 				else:
 					print("Did not find any codelocations (scans) in version {} of project {}".format(args.version_name, args.project_name))
 
-				print("Deleting project-version at: {}".format(project_version['_meta']['href']))
+				print("Deleting project-version {} at: {}".format(project_version['versionName'], project_version['_meta']['href']))
 				hub.execute_delete(project_version['_meta']['href'])
 		else:
 			print("Did not find version with name {} in project {}".format(args.version_name, args.project_name))

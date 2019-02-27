@@ -40,14 +40,14 @@ if 'totalCount' in projects and projects['totalCount'] > 0:
 						print("Deleting code location at: {}".format(code_location_url))
 						hub.execute_delete(code_location_url)
 				else:
-					print("Did not find any codelocations (scans) in version {} of project {}".format(project_version, args.project_name))
+					print("Did not find any codelocations (scans) in version {} of project {}".format(project_version['versionName'], args.project_name))
 
-				print("Deleting project-version at: {}".format(project_version['_meta']['href']))
+				print("Deleting project-version {} at: {}".format(project_version['versionName'], project_version['_meta']['href']))
 				hub.execute_delete(project_version['_meta']['href'])
 		else:
 			print("Did not find versions in project {}".format(args.project_name))
 		
-	print("Deleting project at: {}".format(project['_meta']['href']))
+	print("Deleting project {} at: {}".format(project['name'], project['_meta']['href']))
 	hub.execute_delete(project['_meta']['href'])
 else:
 	print("Did not find project with name {}".format(args.project_name))
