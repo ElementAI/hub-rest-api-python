@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+import copy
 import json
 import os
 import pytest
@@ -87,16 +88,16 @@ def mock_hub_instance_using_api_token(requests_mock):
     yield HubInstance(fake_hub_host, api_token=made_up_api_token)
 
 @pytest.fixture()
-def policy_info_json(requests_mock):
+def policy_info_json():
     with open("policies.json") as policies_json_file:
         yield json.loads(policies_json_file.read())
 
 @pytest.fixture()
-def a_test_policy(requests_mock):
+def a_test_policy():
     yield test_policy
 
 @pytest.fixture()
-def a_test_policy_for_create_or_update(requests_mock):
+def a_test_policy_for_create_or_update():
         # a_policy_for_creating_or_updating = dict(
         #     (attr, test_policy[attr]) for attr in 
         #     ['name', 'description', 'enabled', 'overridable', 'expression', 'severity'] if attr in test_policy)
@@ -401,26 +402,162 @@ def test_create_version_reports(requests_mock, mock_hub_instance):
 def test_create_version_notices_report(requests_mock, mock_hub_instance):
     pass
 
-def test_get_version_link(mock_hub_instance):
-    version_json = json.load(open("version.json"))
+@pytest.fixture()
+def unreviewed_snippet_json():
+    with open("unreviewed_snippet.json") as f:
+        yield json.load(f)[0]
 
-    # replace the base URL with the mocked base url in all the links
-    baseurl = mock_hub_instance.get_urlbase()
-    for link_d in version_json['_meta']['links']:
-        link_d['href'] = re.sub("https://.*/api", "{}/api".format(baseurl), link_d['href'])
+def test_get_ignore_snippet_json(unreviewed_snippet_json, mock_hub_instance):
+    assert 'fileSnippetBomComponents' in unreviewed_snippet_json
+    assert unreviewed_snippet_json['fileSnippetBomComponents'][0]['ignored'] == False
 
-    for link_name in ['versionReport', 'licenseReports', 'riskProfile', 'components', 'vulnerable-components', 'comparison', 'project', 'policy-status', 'codelocations']:
-        url = mock_hub_instance._get_version_link(version_json, link_name)
-        assert url # we got something
+    result = mock_hub_instance.get_ignore_snippet_json(unreviewed_snippet_json)
 
-        parsed_url = urlparse(url)
-        assert parsed_url.scheme == urlparse(fake_hub_host).scheme
-        assert parsed_url.netloc == urlparse(fake_hub_host).netloc
+    assert isinstance(result, list)
+    assert len(result) == 1
+    assert 'fileSnippetBomComponents' in result[0]
+    assert 'ignored' in result[0]['fileSnippetBomComponents'][0]
+    assert 'reviewStatus' in result[0]['fileSnippetBomComponents'][0]
+    assert result[0]['fileSnippetBomComponents'][0]['ignored'] == True
+    assert result[0]['fileSnippetBomComponents'][0]['reviewStatus'] == 'NOT_REVIEWED'
+
+def test_get_confirm_snippet_json(unreviewed_snippet_json, mock_hub_instance):
+    assert 'fileSnippetBomComponents' in unreviewed_snippet_json
+    assert unreviewed_snippet_json['fileSnippetBomComponents'][0]['ignored'] == False
+    
+    result = mock_hub_instance.get_confirm_snippet_json(unreviewed_snippet_json)
+
+    assert isinstance(result, list)
+    assert len(result) == 1
+    assert 'fileSnippetBomComponents' in result[0]
+    assert 'ignored' in result[0]['fileSnippetBomComponents'][0]
+    assert 'reviewStatus' in result[0]['fileSnippetBomComponents'][0]
+    assert result[0]['fileSnippetBomComponents'][0]['ignored'] == False
+    assert result[0]['fileSnippetBomComponents'][0]['reviewStatus'] == 'REVIEWED'
 
 
+@pytest.fixture()
+def sample_snippet_match_json():
+    with open("sample-snippet-match.json") as f:
+        yield json.load(f)
 
 
+def test_generate_new_match_selection(sample_snippet_match_json, mock_hub_instance):
+    assert 'fileSnippetBomComponents' in sample_snippet_match_json
+    assert len(sample_snippet_match_json['fileSnippetBomComponents']) == 1
 
+    # Copy the snippet component match data and delete the keys that are normally missing
+    # from a (vanilla) snippet component alternate match
+    new_component = copy.deepcopy(sample_snippet_match_json['fileSnippetBomComponents'][0])
+    del new_component['ignored']
+    del new_component['reviewStatus']
+    del new_component['versionBomComponentId']
+    new_component['release']['version'] = 'different-version'
 
+    # now verify that they are restored when we prepare to select/update using the alternate match
+    update_body = mock_hub_instance._generate_new_match_selection(sample_snippet_match_json, new_component)
 
+    assert len(update_body) == 1
+    assert 'fileSnippetBomComponents' in update_body[0]
+    assert len(update_body[0]['fileSnippetBomComponents']) == 1
+    updated_component_info = update_body[0]['fileSnippetBomComponents'][0]
+    original_component_info = sample_snippet_match_json['fileSnippetBomComponents'][0]
+    for k in ['ignored', 'reviewStatus', 'versionBomComponentId']:
+        assert k in updated_component_info
+        assert updated_component_info[k] == original_component_info[k]
+
+@pytest.fixture()
+def sample_bom_component_json():
+    with open("sample-bom-component.json") as f:
+        yield json.load(f)
+
+def test_get_edit_snippet_json(sample_snippet_match_json, sample_bom_component_json, mock_hub_instance):
+    assert 'component' in sample_bom_component_json
+    assert 'componentVersion' in sample_bom_component_json
+    assert 'fileSnippetBomComponents' in sample_snippet_match_json
+    assert len(sample_snippet_match_json['fileSnippetBomComponents']) == 1
+
+    new_component_id = sample_bom_component_json['component'].split("/")[-1]
+    new_component_version_id = sample_bom_component_json['componentVersion'].split("/")[-1]
+
+    new_snippet_bom_entry_l = mock_hub_instance.get_edit_snippet_json(sample_snippet_match_json, sample_bom_component_json)
+
+    assert len(new_snippet_bom_entry_l) == 1
+    new_snippet_bom_entry = new_snippet_bom_entry_l[0]
+    
+    assert new_component_id == new_snippet_bom_entry['fileSnippetBomComponents'][0]['project']['id']
+    assert new_component_version_id == new_snippet_bom_entry['fileSnippetBomComponents'][0]['release']['id']
+
+@pytest.fixture()
+def no_roles_user():
+    with open('no-roles-user.json') as f:
+        yield json.load(f)
+
+@pytest.fixture()
+def no_roles_roles():
+    with open('no-roles-roles.json') as f:
+        yield json.load(f)
+
+@pytest.fixture()
+def sysadmin_user():
+    with open('sysadmin-user.json') as f:
+        yield json.load(f)
+
+@pytest.fixture()
+def sysadmin_roles():
+    with open('sysadmin-roles.json') as f:
+        yield json.load(f)
+
+def test_user_has_role(no_roles_user, no_roles_roles, sysadmin_user, sysadmin_roles, mock_hub_instance):
+    test_roles = [
+        'License Manager', 
+        'System Administrator', 
+        'Policy Manager', 
+        'Project Viewer', 
+        'Global Code Scanner', 
+        'Project Manager']
+    
+    mock_hub_instance.get_roles_for_user_or_group = MagicMock()
+    mock_hub_instance.get_roles_for_user_or_group.return_value = no_roles_roles
+
+    for test_role in test_roles:
+        assert mock_hub_instance.user_has_role(no_roles_user, test_role) == False
+
+    mock_hub_instance.get_roles_for_user_or_group.return_value = sysadmin_roles
+
+    for test_role in test_roles:
+        assert mock_hub_instance.user_has_role(sysadmin_user, test_role) == True
+
+def test_get_link(mock_hub_instance):
+    a_url = 'http://a-url'
+    link_name = 'a_link_name'
+    bd_rest_obj = {'_meta':{'links': [{'rel': link_name, 'href': a_url}]}}
+
+    assert mock_hub_instance.get_link(bd_rest_obj, link_name) == a_url
+
+def test_get_link_returns_None_for_invalid_bd_rest_object(mock_hub_instance):
+    bd_rest_obj = {}
+
+    assert mock_hub_instance.get_link(bd_rest_obj, 'a_link_name') == None
+
+def test_validated_json_with_a_dictionary(mock_hub_instance):
+    validated_json = mock_hub_instance._validated_json_data({'key':'value'})
+    assert isinstance(validated_json, str)
+    assert validated_json == '{"key": "value"}'
+
+def test_validated_json_with_a_list(mock_hub_instance):
+    validated_json = mock_hub_instance._validated_json_data(['item1', 'item2'])
+    assert isinstance(validated_json, str)
+    assert validated_json == '["item1", "item2"]'
+
+def test_validated_json_with_a_json_str(mock_hub_instance):
+    validated_json = mock_hub_instance._validated_json_data('{"key": "value"}')
+
+    assert validated_json == '{"key": "value"}'
+
+def test_validated_json_fails_with_invalid_json_str(mock_hub_instance):
+    from json import JSONDecodeError
+
+    with pytest.raises(JSONDecodeError) as e_info:
+        validated_json = mock_hub_instance._validated_json_data('invalid json')
 
